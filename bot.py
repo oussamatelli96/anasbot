@@ -13,6 +13,10 @@ import sys
 import re
 import threading
 
+import os
+
+import os
+
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("لم يتم العثور على BOT_TOKEN في Environment Variables")
