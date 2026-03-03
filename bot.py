@@ -13,12 +13,7 @@ import sys
 import re
 import threading
 
-import os
-
-import os
-
 TOKEN = os.getenv("BOT_TOKEN")
-
 if not TOKEN:
     raise ValueError("لم يتم العثور على BOT_TOKEN في Environment Variables")
 
@@ -207,7 +202,7 @@ def try_register_with_number(sender_number, otp, user_id, user_name, max_attempt
                 save_registered_number(number_data)
                
                 try:
-                    bot.send_message(user_id, f"🎉 تم تفعيل 1 جيغابايت بنجاح!\n(ملاحظة مهمة: التفعيل 1 جيغا فقط كل 24 ساعة)")
+                    bot.send_message(user_id, f"🎉 تم تفعيل 1 جيغابايت بنجاح!\nملاحظة مهمة: التفعيل 1 جيغا فقط كل 24 ساعة")
                 except:
                     pass
             else:
@@ -308,9 +303,6 @@ def help_command(message):
     """
     bot.reply_to(message, help_text, parse_mode="Markdown")
 
-# باقي الدوال (stats_command, allstats_command, handle_message, try_register_with_number) كما هي
-# مع التأكد من التحقق من الاشتراك في handle_message قبل معالجة الرقم
-
 @bot.message_handler(commands=['stats'])
 def stats_command(message):
     user_id = message.from_user.id
@@ -382,7 +374,7 @@ def handle_message(message):
    
     # التحقق من الاشتراك قبل أي عملية
     if not is_subscribed(user_id):
-        markup = types.InlineKeyboardMarkup()
+        markup = types.InlineKeyboardMarkup(row_width=1)
         markup.add(types.InlineKeyboardButton("اشترك في القناة الآن", url=f"https://t.me/{CHANNEL_ID[1:]}"))
         markup.add(types.InlineKeyboardButton("✅ تحقق من الاشتراك", callback_data="check_sub"))
         markup.add(types.InlineKeyboardButton("📞 تواصل مع المالك", url=f"https://t.me/{OWNER_USERNAME[1:]}"))
