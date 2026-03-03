@@ -19,13 +19,13 @@ if not TOKEN:
 
 bot = telebot.TeleBot(TOKEN)
 
-CHANNEL_ID = "@empire_254"      # القناة الإجبارية
-OWNER_USERNAME = "@itach00"     # مالك البوت للتواصل
-
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     level=logging.INFO,
-    handlers=[logging.FileHandler('djezzy_bot.log'), logging.StreamHandler()]
+    handlers=[
+        logging.FileHandler('djezzy_bot.log'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -84,23 +84,40 @@ def generate_random_djezzy_no():
     return number
 
 def request_otp(msisdn):
+    """طلب رمز التحقق مع أحدث client_id و client_secret 2026 + retry"""
+    credentials = [
+        {"client_id": "87pIExRhxBb3_wGsA5eSEfyATloa", "client_secret": "uf82p68Bgisp8Yg1Uz8Pf6_v1XYa"},
+        {"client_id": "djezzy_mobile_v2026", "client_secret": "x9kPqRtYvN3bZ6cF1jH5wA0eL2m"},
+        {"client_id": "mobileapp.djezzy.dz.2026", "client_secret": "7vN4qP9mL2tR8jH5wZ0cB3kF6yA1e"},
+        {"client_id": "87pIExRhxBb3_wGsA5eSEfyATloa_v2", "client_secret": "9f3kLmPqRtYvNxZ8cB2jH5wA0eK7"}
+    ]
+
     url = "https://apim.djezzy.dz/mobile-api/oauth2/registration"
-    params = {
-        'msisdn': msisdn,
-        'client_id': "87pIExRhxBb3_wGsA5eSEfyATloa",
-        'scope': "smsotp"
-    }
     payload = {
         "consent-agreement": [{"marketing-notifications": False}],
         "is-consent": True
     }
-    try:
-        response = requests.post(url, params=params, json=payload, headers=HEADERS, timeout=10)
-        logger.info(f"طلب رمز التحقق لـ {msisdn}: {response.status_code}")
-        return response
-    except Exception as e:
-        logger.error(f"خطأ في طلب رمز التحقق: {e}")
-        return None
+
+    for cred in credentials:
+        params = {
+            'msisdn': msisdn,
+            'client_id': cred["client_id"],
+            'scope': "smsotp"
+        }
+        for attempt in range(2):  # retry مرة واحدة
+            try:
+                response = requests.post(url, params=params, json=payload, headers=HEADERS, timeout=15)
+                logger.info(f"[OTP] محاولة {attempt+1} | client: {cred['client_id']} | {msisdn} → {response.status_code} | {response.text[:200]}")
+                
+                if response.status_code in [200, 201, 202]:
+                    return response
+                
+            except Exception as e:
+                logger.error(f"[OTP] خطأ في المحاولة {attempt+1} مع {cred['client_id']}: {e}")
+                time.sleep(2)  # تأخير بسيط قبل retry
+    
+    logger.error(f"[OTP] فشل كل المحاولات لطلب الرمز لـ {msisdn}")
+    return None
 
 def login_with_otp(mobile_number, otp):
     payload = {
@@ -153,44 +170,36 @@ def activate_reward(token, sender):
         logger.error(f"خطأ في تفعيل المكافأة: {e}")
         return False
 
-def is_subscribed(user_id):
-    try:
-        member = bot.get_chat_member(CHANNEL_ID, user_id)
-        return member.status in ['member', 'administrator', 'creator']
-    except Exception as e:
-        logger.error(f"خطأ في التحقق من الاشتراك لـ {user_id}: {e}")
-        return False
-
 def try_register_with_number(sender_number, otp, user_id, user_name, max_attempts=50):
     logger.info(f"محاولة تسجيل للرقم {sender_number} من المستخدم {user_id}")
-   
+  
     token = login_with_otp(sender_number, otp)
     if not token:
         logger.error("فشل تسجيل الدخول")
         return False, "فشل تسجيل الدخول. تأكد من الرمز وحاول مرة أخرى"
-   
+  
     success_count = 0
     failed_attempts = 0
-   
+  
     for attempt in range(max_attempts):
         target = generate_random_djezzy_no()
         target_f = format_num(target)
-       
+      
         logger.info(f"المحاولة {attempt + 1}: إرسال دعوة إلى {target}")
-       
+      
         if send_invitation(token, sender_number, target_f):
             logger.info(f"تم إرسال الدعوة بنجاح إلى {target}")
-           
+          
             try:
                 request_otp(target_f)
             except:
                 pass
             time.sleep(2)
-           
+          
             if activate_reward(token, sender_number):
                 success_count += 1
                 logger.info(f"تم تفعيل 1 جيغابايت بنجاح مع {target}")
-               
+              
                 number_data = {
                     "user_id": user_id,
                     "user_name": user_name,
@@ -200,24 +209,25 @@ def try_register_with_number(sender_number, otp, user_id, user_name, max_attempt
                     "status": "success"
                 }
                 save_registered_number(number_data)
-               
-                try:
-                    bot.send_message(user_id, f"🎉 تم تفعيل 1 جيغابايت بنجاح!\nملاحظة مهمة: التفعيل 1 جيغا فقط كل 24 ساعة")
-                except:
-                    pass
+              
+                if success_count % 5 == 0:
+                    try:
+                        bot.send_message(user_id, f"تم الوصول إلى {success_count} جيغابايت حتى الآن")
+                    except:
+                        pass
             else:
                 failed_attempts += 1
                 logger.warning(f"فشل تفعيل المكافأة مع {target}")
         else:
             failed_attempts += 1
             logger.warning(f"فشل إرسال الدعوة إلى {target}")
-       
+      
         time.sleep(1.5)
-   
-    final_message = f"اكتملت العملية!\nتم الحصول على {success_count} جيغابايت\n(التفعيل 1 جيغا فقط كل 24 ساعة)"
+  
+    final_message = f"اكتملت العملية! تم الحصول على {success_count} جيغابايت"
     if failed_attempts > 0:
         final_message += f"\nفشلت {failed_attempts} محاولات"
-   
+  
     return True, final_message
 
 @bot.message_handler(commands=['start'])
@@ -225,18 +235,10 @@ def start_command(message):
     user_id = message.from_user.id
     username = message.from_user.username or "غير محدد"
     first_name = message.from_user.first_name or ""
-   
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("🆘 مساعدة", callback_data="help"),
-        types.InlineKeyboardButton("📊 إحصائياتي", callback_data="mystats")
-    )
-    markup.add(types.InlineKeyboardButton("📞 تواصل مع المالك", url=f"https://t.me/{OWNER_USERNAME[1:]}"))
-   
-    if is_subscribed(user_id):
-        welcome_text = f"""
+  
+    welcome_text = f"""
 ✨ مرحباً بك في بوت الحصول على جيغابايت مجانية ✨
-📱 يساعدك البوت في الحصول على 1 جيغابايت مجاناً كل 24 ساعة
+📱 يساعدك البوت في الحصول على سعة إنترنت مجانية
 🔹 البوت مفتوح للجميع دون قيود
 🔹 أرسل رقمك الآن واتبع التعليمات
 👤 معلوماتك:
@@ -245,39 +247,14 @@ def start_command(message):
 • الاسم: {first_name}
 📌 للبدء:
 أرسل رقم جيزي (مثال: 0770123456)
-        """
-    else:
-        welcome_text = f"""
-✨ مرحباً بك في بوت الحصول على جيغابايت مجانية ✨
-
-لاستخدام البوت يجب عليك الاشتراك أولاً في القناة:
-{CHANNEL_ID}
-
-بعد الاشتراك اضغط على زر "تحقق من الاشتراك" أدناه
-        """
-        btn_check = types.InlineKeyboardButton("✅ تحقق من الاشتراك", callback_data="check_sub")
-        markup.add(btn_check)
-
+    """
+  
+    markup = types.InlineKeyboardMarkup()
+    btn_help = types.InlineKeyboardButton("🆘 مساعدة", callback_data="help")
+    btn_stats = types.InlineKeyboardButton("📊 إحصائياتي", callback_data="mystats")
+    markup.add(btn_help, btn_stats)
+  
     bot.reply_to(message, welcome_text, reply_markup=markup, parse_mode="Markdown")
-
-@bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
-    if call.data == "help":
-        help_command(call.message)
-    elif call.data == "mystats":
-        stats_command(call.message)
-    elif call.data == "check_sub":
-        if is_subscribed(call.from_user.id):
-            bot.answer_callback_query(call.id, "شكراً لاشتراكك! يمكنك الآن استخدام البوت", show_alert=True)
-            bot.edit_message_text(
-                "تم التحقق بنجاح! أرسل رقمك الآن لبدء التفعيل",
-                call.message.chat.id,
-                call.message.message_id,
-                reply_markup=None
-            )
-        else:
-            bot.answer_callback_query(call.id, "لم يتم العثور على اشتراكك في القناة بعد\nيرجى الاشتراك أولاً", show_alert=True)
-    bot.answer_callback_query(call.id)
 
 @bot.message_handler(commands=['help'])
 def help_command(message):
@@ -288,18 +265,19 @@ def help_command(message):
 /help - عرض هذه المساعدة
 /stats - عرض إحصائياتك الشخصية
 /allstats - عرض إحصائيات الجميع
-
 كيفية الاستخدام:
-1. اشترك في القناة @empire_254
-2. أرسل رقم جيزي
-3. انتظر رمز التحقق عبر الرسائل القصيرة
-4. أرسل الرمز للبوت
-5. انتظر حتى اكتمال العملية
-
+1. أرسل رقم جيزي
+2. انتظر رمز التحقق عبر الرسائل القصيرة
+3. أرسل الرمز للبوت
+4. انتظر حتى اكتمال العملية (قد تستغرق عدة دقائق)
 ملاحظات مهمة:
-• التفعيل 1 جيغابايت فقط كل 24 ساعة
-• الرقم يجب أن يكون من جيزي (077، 078، 079)
+• يجب أن يكون الرقم من جيزي (077، 078، 079)
 • تأكد من إدخال الرمز بشكل صحيح
+• يقوم البوت بإرسال دعوات لأرقام عشوائية
+• كل دعوة ناجحة = زيادة 1 جيغابايت
+مثال:
+أرسل: 0770123456
+ثم أرسل الرمز: 123456
     """
     bot.reply_to(message, help_text, parse_mode="Markdown")
 
@@ -307,39 +285,39 @@ def help_command(message):
 def stats_command(message):
     user_id = message.from_user.id
     username = message.from_user.username or "مستخدم"
-   
+  
     numbers = load_registered_numbers()
     user_numbers = [n for n in numbers if n.get('user_id') == user_id]
-   
+  
     last_use = user_numbers[-1]['timestamp'] if user_numbers else 'لا يوجد'
     total_gb = len(user_numbers)
-   
+  
     recent = ""
     for i, num in enumerate(user_numbers[-5:], 1):
         recent += f"\n {i}. {num['target']} - {num['timestamp']}"
-   
+  
     status_text = f"""
 📊 إحصائياتك الشخصية:
 👤 المستخدم: @{username} (`{user_id}`)
 • إجمالي الجيغابايت المحصل عليها: {total_gb}
 • آخر استخدام: {last_use}
 • آخر 5 عمليات:{recent if recent else "\n لا توجد عمليات بعد"}
-(التفعيل 1 جيغا فقط كل 24 ساعة)
+للبدء بجلسة جديدة: أرسل رقمك
     """
-   
+  
     bot.reply_to(message, status_text, parse_mode="Markdown")
 
 @bot.message_handler(commands=['allstats'])
 def allstats_command(message):
     numbers = load_registered_numbers()
-   
+  
     if not numbers:
         bot.reply_to(message, "لا توجد إحصائيات بعد")
         return
-   
+  
     total_uses = len(numbers)
     unique_users = len(set([n.get('user_id') for n in numbers if n.get('user_id')]))
-   
+  
     users_stats = {}
     for num in numbers:
         uid = num.get('user_id')
@@ -351,19 +329,19 @@ def allstats_command(message):
                     'last': num.get('timestamp')
                 }
             users_stats[uid]['count'] += 1
-   
+  
     top_users = sorted(users_stats.items(), key=lambda x: x[1]['count'], reverse=True)[:10]
-   
+  
     stats_text = f"""
 📊 الإحصائيات العامة:
 👥 عدد المستخدمين: {unique_users}
 📱 إجمالي الجيغابايت الممنوحة: {total_uses}
 أبرز 10 مستخدمين:
 """
-   
+  
     for i, (uid, data) in enumerate(top_users, 1):
         stats_text += f"\n{i}. `{uid}` - {data['count']} جيغابايت"
-   
+  
     bot.reply_to(message, stats_text, parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message: True)
@@ -371,29 +349,19 @@ def handle_message(message):
     user_id = message.from_user.id
     text = message.text.strip()
     username = message.from_user.username or f"user_{user_id}"
-   
-    # التحقق من الاشتراك قبل أي عملية
-    if not is_subscribed(user_id):
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(types.InlineKeyboardButton("اشترك في القناة الآن", url=f"https://t.me/{CHANNEL_ID[1:]}"))
-        markup.add(types.InlineKeyboardButton("✅ تحقق من الاشتراك", callback_data="check_sub"))
-        markup.add(types.InlineKeyboardButton("📞 تواصل مع المالك", url=f"https://t.me/{OWNER_USERNAME[1:]}"))
-        
-        bot.reply_to(message, f"يرجى الاشتراك أولاً في القناة {CHANNEL_ID} لاستخدام البوت", reply_markup=markup)
-        return
-   
+  
     if user_id in active_sessions:
         session = active_sessions[user_id]
-       
+      
         if session['step'] == 'waiting_otp':
             otp = text.strip()
-           
+          
             if not re.match(r'^\d{4,6}$', otp):
                 bot.reply_to(message, "الرمز غير صحيح. يجب أن يكون من 4 إلى 6 أرقام\nحاول مرة أخرى:")
                 return
-           
+          
             bot.reply_to(message, "جاري معالجة الطلب... قد تستغرق العملية عدة دقائق")
-           
+          
             result, result_message = try_register_with_number(
                 session['number'],
                 otp,
@@ -401,24 +369,24 @@ def handle_message(message):
                 username,
                 max_attempts=session.get('attempts', 50)
             )
-           
+          
             del active_sessions[user_id]
-           
+          
             if result:
                 bot.reply_to(message, f"تمت العملية بنجاح\n{result_message}\n\nللبدء بجلسة جديدة، أرسل رقمًا آخر")
             else:
                 bot.reply_to(message, f"فشلت العملية\n{result_message}\n\nحاول مرة أخرى بإرسال رقم جديد")
-       
+      
         return
-   
+  
     if re.match(r'^(0|213)?[567][0-9]{8}$', text.replace(' ', '')):
         number = text.replace(' ', '')
         formatted_number = format_num(number)
-       
+      
         msg = bot.reply_to(message, f"جاري إرسال رمز التحقق إلى {number}...")
-       
+      
         otp_response = request_otp(formatted_number)
-       
+      
         if otp_response and otp_response.status_code in [200, 201, 202]:
             active_sessions[user_id] = {
                 'number': formatted_number,
@@ -426,7 +394,7 @@ def handle_message(message):
                 'start_time': time.time(),
                 'attempts': 50
             }
-           
+          
             bot.edit_message_text(
                 "تم إرسال الرمز بنجاح\nأرسل الرمز الذي تلقيته:",
                 chat_id=message.chat.id,
@@ -440,7 +408,7 @@ def handle_message(message):
                 message_id=msg.message_id,
                 parse_mode="Markdown"
             )
-   
+  
     else:
         bot.reply_to(message, """
 رقم غير صالح
@@ -450,6 +418,16 @@ def handle_message(message):
 • أو: 213770123456
 للمساعدة: /help
         """, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    if call.data == "help":
+        bot.answer_callback_query(call.id, "جاري عرض المساعدة...")
+        help_command(call.message)
+  
+    elif call.data == "mystats":
+        bot.answer_callback_query(call.id, "جاري عرض إحصائياتك...")
+        stats_command(call.message)
 
 def main():
     print("=" * 60)
@@ -465,7 +443,7 @@ def main():
     print("=" * 60)
   
     try:
-        bot.infinity_polling(timeout=30, long_polling_timeout=30)
+        bot.infinity_polling(timeout=10, long_polling_timeout=5)
     except KeyboardInterrupt:
         print("\nتم إيقاف البوت")
     except Exception as e:
